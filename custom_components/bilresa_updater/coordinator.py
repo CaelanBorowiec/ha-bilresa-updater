@@ -235,37 +235,99 @@ class BilresaManager:
     # ------------------------------------------------------------------
     # Device metadata helpers
     # ------------------------------------------------------------------
+    def _basic_info_value(self, node_id: int, attribute: Any) -> Any:
+        """Read a BasicInformation attribute (endpoint 0) from the node cache.
+
+        This uses the same access path as Home Assistant's own Matter
+        integration (``get_attribute_value``) rather than the ``device_info``
+        convenience property, which can return ``None`` for composed/bridged
+        endpoints.
+        """
+        return self._read_attribute(node_id, 0, clusters.BasicInformation, attribute)
+
     def get_product_name(self, node_id: int) -> str | None:
-        try:
-            info = self._get_node(node_id).device_info
-        except (NodeNotExists, BilresaConnectionError):
-            return None
-        return getattr(info, "productName", None) if info else None
+        return _clean_name(
+            self._basic_info_value(
+                node_id, clusters.BasicInformation.Attributes.ProductName
+            )
+        )
+
+    def get_node_label(self, node_id: int) -> str | None:
+        return _clean_name(
+            self._basic_info_value(
+                node_id, clusters.BasicInformation.Attributes.NodeLabel
+            )
+        )
 
     def get_node_name(self, node_id: int) -> str:
-        product = self.get_product_name(node_id)
-        return product or f"BILRESA {node_id}"
+        """Return a human friendly device name.
+
+        Prefer the user-set NodeLabel, then the product name, and only fall
+        back to the node id when neither is available.
+        """
+        for candidate in (self.get_node_label(node_id), self.get_product_name(node_id)):
+            if candidate:
+                return candidate
+        return f"IKEA BILRESA (node {node_id})"
+
+    def get_manufacturer(self, node_id: int) -> str | None:
+        return _clean_name(
+            self._basic_info_value(
+                node_id, clusters.BasicInformation.Attributes.VendorName
+            )
+        ) or "IKEA of Sweden"
 
     def get_serial(self, node_id: int) -> str | None:
-        try:
-            info = self._get_node(node_id).device_info
-        except (NodeNotExists, BilresaConnectionError):
-            return None
-        return getattr(info, "serialNumber", None) if info else None
+        serial = self._basic_info_value(
+            node_id, clusters.BasicInformation.Attributes.SerialNumber
+        )
+        if serial and "test" not in str(serial).lower():
+            return str(serial)
+        return None
 
     def get_software_version_string(self, node_id: int) -> str | None:
-        try:
-            info = self._get_node(node_id).device_info
-        except (NodeNotExists, BilresaConnectionError):
-            return None
-        return getattr(info, "softwareVersionString", None) if info else None
+        return self._basic_info_value(
+            node_id, clusters.BasicInformation.Attributes.SoftwareVersionString
+        )
 
     def get_software_version_int(self, node_id: int) -> int | None:
-        try:
-            info = self._get_node(node_id).device_info
-        except (NodeNotExists, BilresaConnectionError):
+        return self._basic_info_value(
+            node_id, clusters.BasicInformation.Attributes.SoftwareVersion
+        )
+
+    def get_matter_device_identifier(self, node_id: int) -> tuple[str, str] | None:
+        """Return the device registry identifier the Matter integration uses.
+
+        Linking our entities to that identifier attaches them to the existing
+        Matter device (inheriting its name, firmware, area, etc.) instead of
+        creating a confusing duplicate device.
+        """
+        if self.client is None or self.client.server_info is None:
             return None
-        return getattr(info, "softwareVersion", None) if info else None
+        node = self._safe_node(node_id)
+        if node is None:
+            return None
+        endpoint = node.endpoints.get(0)
+        if endpoint is None:
+            return None
+
+        device_id: str | None = None
+        try:
+            from homeassistant.components.matter.const import ID_TYPE_DEVICE_ID
+            from homeassistant.components.matter.helpers import get_device_id
+
+            device_id = get_device_id(self.client.server_info, endpoint)
+            return (MATTER_DOMAIN, f"{ID_TYPE_DEVICE_ID}_{device_id}")
+        except Exception:  # noqa: BLE001 - fall back to manual computation
+            pass
+
+        try:
+            fabric_hex = f"{self.client.server_info.compressed_fabric_id:016X}"
+            node_hex = f"{node_id:016X}"
+            device_id = f"{fabric_hex}-{node_hex}-MatterNodeDevice"
+        except Exception:  # noqa: BLE001
+            return None
+        return (MATTER_DOMAIN, f"deviceid_{device_id}")
 
     def get_battery_percent(self, node_id: int) -> int | None:
         """Return the battery level (0-100) or None if unknown.
@@ -528,6 +590,14 @@ class BilresaManager:
                     await stop_event.wait()
             except asyncio.TimeoutError:
                 continue
+
+
+def _clean_name(name: Any) -> str | None:
+    """Strip null chars/whitespace from a Matter name, returning None if empty."""
+    if not name:
+        return None
+    cleaned = str(name).replace("\x00", "").strip()
+    return cleaned or None
 
 
 @callback

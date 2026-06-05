@@ -20,14 +20,23 @@ class BilresaEntity(Entity):
         """Initialize the entity."""
         self._manager = manager
         self._node_id = node_id
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(node_id))},
-            manufacturer="IKEA of Sweden",
-            model=manager.get_product_name(node_id) or "BILRESA",
-            name=manager.get_node_name(node_id),
-            serial_number=manager.get_serial(node_id),
-            sw_version=manager.get_software_version_string(node_id),
-        )
+
+        matter_identifier = manager.get_matter_device_identifier(node_id)
+        if matter_identifier is not None:
+            # Attach to the existing Matter device so the name, firmware version
+            # and area are inherited from the device the user already sees.
+            self._attr_device_info = DeviceInfo(identifiers={matter_identifier})
+        else:
+            # Fallback: stand up our own device entry with the best metadata we
+            # can read directly from the node.
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, str(node_id))},
+                manufacturer=manager.get_manufacturer(node_id),
+                model=manager.get_product_name(node_id) or "BILRESA",
+                name=manager.get_node_name(node_id),
+                serial_number=manager.get_serial(node_id),
+                sw_version=manager.get_software_version_string(node_id),
+            )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to node updates."""

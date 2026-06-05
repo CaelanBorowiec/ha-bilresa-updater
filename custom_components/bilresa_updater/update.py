@@ -54,7 +54,13 @@ class BilresaUpdateEntity(BilresaEntity, UpdateEntity):
     @property
     def installed_version(self) -> str | None:
         """Return the currently installed firmware version."""
-        return self._manager.get_software_version_string(self._node_id)
+        version = self._manager.get_software_version_string(self._node_id)
+        if version:
+            return version
+        # Some devices leave SoftwareVersionString empty; fall back to the
+        # numeric SoftwareVersion so the card never shows "unknown".
+        version_int = self._manager.get_software_version_int(self._node_id)
+        return str(version_int) if version_int is not None else None
 
     @property
     def in_progress(self) -> bool:
