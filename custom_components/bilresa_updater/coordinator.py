@@ -29,7 +29,9 @@ from matter_server.common.models import EventType
 from chip.clusters import Objects as clusters
 
 from .const import (
+    ACTIVE_OTA_STATES,
     CONF_URL,
+    DISCONNECT_INSTALL_GRACE,
     ICD_OPERATING_MODE_NAMES,
     IKEA_VENDOR_ID,
     KEEP_AWAKE_DURATION_MS,
@@ -38,6 +40,7 @@ from .const import (
     KEEP_AWAKE_REARM_RATIO,
     LISTEN_TASK_NAME,
     MATTER_DOMAIN,
+    MIN_BATTERY_PERCENT,
     OTA_UPDATE_STATE_NAMES,
     PRODUCT_NAME_MATCH,
     STAY_ACTIVE_REQUEST_COMMAND_ID,
@@ -115,7 +118,28 @@ class BilresaManager:
             _LOGGER.error("Matter Server listener stopped: %s", err)
 
     async def async_disconnect(self) -> None:
-        """Tear down the connection."""
+        """Tear down the connection.
+
+        If a firmware update is still running, ripping out the websocket would
+        kill the keep-awake loop and abort the transfer. Wait briefly for the
+        install to finish before tearing down.
+        """
+        if self._installing:
+            _LOGGER.warning(
+                "Disconnecting while a firmware update is in progress for node(s) "
+                "%s; waiting for it to finish to avoid aborting the transfer",
+                ", ".join(str(n) for n in self._installing),
+            )
+            try:
+                async with asyncio.timeout(DISCONNECT_INSTALL_GRACE):
+                    async with self._install_lock:
+                        pass
+            except asyncio.TimeoutError:
+                _LOGGER.warning(
+                    "Firmware update still running after %ss; tearing down anyway",
+                    DISCONNECT_INSTALL_GRACE,
+                )
+
         if self._unsub_events is not None:
             self._unsub_events()
             self._unsub_events = None
@@ -184,14 +208,22 @@ class BilresaManager:
         if self._ota_endpoint(node) is None:
             return False
         product = (getattr(info, "productName", "") or "").upper()
-        # Match BILRESA by name when available, but still accept IKEA OTA
-        # capable nodes whose name is blank so future revisions keep working.
-        return PRODUCT_NAME_MATCH in product or product == ""
+        # Only attach to nodes that positively identify as BILRESA. Accepting
+        # blank/unknown product names could expose firmware actions on unrelated
+        # IKEA Matter devices, so we require an explicit name match.
+        return PRODUCT_NAME_MATCH in product
 
     @staticmethod
     def _ota_endpoint(node: Any) -> int | None:
         for ep_id, endpoint in node.endpoints.items():
             if endpoint.has_cluster(clusters.OtaSoftwareUpdateRequestor):
+                return ep_id
+        return None
+
+    @staticmethod
+    def _power_source_endpoint(node: Any) -> int | None:
+        for ep_id, endpoint in node.endpoints.items():
+            if endpoint.has_cluster(clusters.PowerSource):
                 return ep_id
         return None
 
@@ -234,6 +266,25 @@ class BilresaManager:
         except (NodeNotExists, BilresaConnectionError):
             return None
         return getattr(info, "softwareVersion", None) if info else None
+
+    def get_battery_percent(self, node_id: int) -> int | None:
+        """Return the battery level (0-100) or None if unknown.
+
+        Matter reports BatPercentRemaining in half-percent units (0-200), so we
+        halve it to get a normal 0-100 percentage.
+        """
+        node = self._safe_node(node_id)
+        if node is None:
+            return None
+        value = self._read_attribute(
+            node_id,
+            self._power_source_endpoint(node),
+            clusters.PowerSource,
+            clusters.PowerSource.Attributes.BatPercentRemaining,
+        )
+        if value is None:
+            return None
+        return int(value) // 2
 
     # ------------------------------------------------------------------
     # OTA / ICD status helpers (read from the live node cache)
@@ -325,6 +376,21 @@ class BilresaManager:
         """
         if self.client is None:
             raise BilresaConnectionError("Matter Server not connected")
+
+        battery = self.get_battery_percent(node_id)
+        if battery is not None and battery < MIN_BATTERY_PERCENT:
+            raise HomeAssistantError(
+                f"Battery too low for firmware update ({battery}%) - replace the "
+                f"batteries first (minimum {MIN_BATTERY_PERCENT}%)"
+            )
+
+        state = self.get_update_state_name(node_id)
+        if state in ACTIVE_OTA_STATES:
+            raise HomeAssistantError(
+                f"A firmware update is already in progress for device {node_id} "
+                f"(state: {state})"
+            )
+
         if software_version is None:
             update = await self.check_update(node_id)
             if update is None:
@@ -436,7 +502,20 @@ class BilresaManager:
             return
 
         while not stop_event.is_set():
-            promised = await self.keep_awake_once(node_id)
+            try:
+                promised = await self.keep_awake_once(node_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001 - the loop must never die mid-OTA
+                # If this loop stops, the sleepy device drops to slow polling and
+                # the transfer stalls. Log and keep retrying instead of dying.
+                _LOGGER.warning(
+                    "Keep-awake request for node %s failed (%s); retrying in %ss",
+                    node_id,
+                    err,
+                    KEEP_AWAKE_FALLBACK_INTERVAL,
+                )
+                promised = None
             if promised:
                 interval = max(
                     KEEP_AWAKE_MIN_INTERVAL,

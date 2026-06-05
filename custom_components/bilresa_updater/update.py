@@ -42,9 +42,7 @@ class BilresaUpdateEntity(BilresaEntity, UpdateEntity):
     _attr_should_poll = True
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_supported_features = (
-        UpdateEntityFeature.INSTALL
-        | UpdateEntityFeature.PROGRESS
-        | UpdateEntityFeature.SPECIFIC_VERSION
+        UpdateEntityFeature.INSTALL | UpdateEntityFeature.PROGRESS
     )
 
     def __init__(self, manager: Any, node_id: int) -> None:
@@ -85,12 +83,12 @@ class BilresaUpdateEntity(BilresaEntity, UpdateEntity):
     async def async_install(
         self, version: str | None, backup: bool, **kwargs: Any
     ) -> None:
-        """Install firmware, keeping the sleepy device awake throughout."""
-        target: int | str | None
-        if version is not None:
-            target = version
-        elif self._software_update is not None:
+        """Install the validated latest firmware, keeping the device awake.
+
+        We always target the DCL-validated image (ignoring any user-supplied
+        version) so we never push an unvalidated or incompatible build.
+        """
+        target: int | None = None
+        if self._software_update is not None:
             target = self._software_update.software_version
-        else:
-            target = None
         await self._manager.install(self._node_id, target)

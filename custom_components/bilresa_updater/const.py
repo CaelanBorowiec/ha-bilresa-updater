@@ -29,6 +29,11 @@ ICD_MANAGEMENT_CLUSTER_ID: Final = 0x0046
 # ICD Management command ids.
 STAY_ACTIVE_REQUEST_COMMAND_ID: Final = 0x03
 
+# Minimum battery level (percent) required before starting a firmware update.
+# A flash interrupted by a dying battery on a battery-powered remote can brick
+# the device, so refuse to start below this threshold.
+MIN_BATTERY_PERCENT: Final = 20
+
 # Keep-awake tuning.
 # Duration (ms) we ask the ICD to remain in active mode on each request.
 KEEP_AWAKE_DURATION_MS: Final = 60_000
@@ -38,6 +43,10 @@ KEEP_AWAKE_REARM_RATIO: Final = 0.75
 KEEP_AWAKE_MIN_INTERVAL: Final = 4
 # Used when the device does not return a usable PromisedActiveDuration.
 KEEP_AWAKE_FALLBACK_INTERVAL: Final = 20
+
+# Seconds to wait for an in-flight firmware update to finish before tearing
+# down the connection on unload/disconnect.
+DISCONNECT_INSTALL_GRACE: Final = 30
 
 # Background task names.
 LISTEN_TASK_NAME: Final = "bilresa_updater_matter_listen"
@@ -53,6 +62,13 @@ OTA_UPDATE_STATE_NAMES: Final[dict[int, str]] = {
     6: "rolling_back",
     7: "delayed_on_apply",
 }
+
+# OtaSoftwareUpdateRequestor UpdateState names that indicate an active transfer.
+# Starting a new install while in one of these states would re-announce the
+# provider mid-flight, so we refuse.
+ACTIVE_OTA_STATES: Final[frozenset[str]] = frozenset(
+    {"downloading", "applying", "rolling_back", "delayed_on_apply"}
+)
 
 # ICD Management OperatingMode enum.
 ICD_OPERATING_MODE_NAMES: Final[dict[int, str]] = {
