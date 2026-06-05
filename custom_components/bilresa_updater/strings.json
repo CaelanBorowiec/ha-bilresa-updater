@@ -49,9 +49,11 @@
     "button": {
       "keep_awake": {
         "name": "Keep awake now"
-      },
-      "retry_update": {
-        "name": "Retry firmware update"
+      }
+    },
+    "binary_sensor": {
+      "keep_awake_active": {
+        "name": "Keep-awake active"
       }
     }
   }

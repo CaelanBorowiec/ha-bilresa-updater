@@ -14,7 +14,11 @@ from .coordinator import BilresaConnectionError, BilresaManager
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.SENSOR, Platform.UPDATE]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.SENSOR,
+]
 
 type BilresaConfigEntry = ConfigEntry[BilresaManager]
 

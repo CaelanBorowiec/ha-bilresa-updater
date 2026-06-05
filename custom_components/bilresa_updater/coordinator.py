@@ -22,17 +22,15 @@ from matter_server.common.errors import (
     MatterError,
     NodeNotExists,
     NodeNotReady,
-    UpdateError,
 )
 from matter_server.common.models import EventType
 
 from chip.clusters import Objects as clusters
 
 from .const import (
-    ACTIVE_OTA_STATES,
     CONF_URL,
-    DISCONNECT_INSTALL_GRACE,
     ICD_OPERATING_MODE_NAMES,
+    IDLE_OTA_STATES,
     IKEA_VENDOR_ID,
     KEEP_AWAKE_DURATION_MS,
     KEEP_AWAKE_FALLBACK_INTERVAL,
@@ -69,11 +67,13 @@ class BilresaManager:
         self.client: MatterClient | None = None
         self._listen_task: asyncio.Task[None] | None = None
         self._unsub_events: Callable[[], None] | None = None
-        self._install_lock = asyncio.Lock()
-        self._installing: set[int] = set()
-        self._progress: dict[int, float | None] = {}
         self._last_promised: dict[int, int | None] = {}
         self._listeners: dict[int, list[Callable[[], None]]] = {}
+        # Node ids recognised as BILRESA remotes (populated on connect).
+        self._bilresa_ids: set[int] = set()
+        # Active keep-awake loops, keyed by node id.
+        self._keepalive_tasks: dict[int, asyncio.Task[None]] = {}
+        self._keepalive_stops: dict[int, asyncio.Event] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -107,6 +107,11 @@ class BilresaManager:
             self._handle_event, event_filter=EventType.ATTRIBUTE_UPDATED
         )
 
+        self._bilresa_ids = set(self.get_bilresa_node_ids())
+        # In case an update is already mid-flight when we start up, evaluate now.
+        for node_id in self._bilresa_ids:
+            self._evaluate_keepawake(node_id)
+
     async def _listen(self, init_ready: asyncio.Event) -> None:
         """Run the client listen loop (lives for the duration of the entry)."""
         assert self.client is not None
@@ -118,27 +123,23 @@ class BilresaManager:
             _LOGGER.error("Matter Server listener stopped: %s", err)
 
     async def async_disconnect(self) -> None:
-        """Tear down the connection.
-
-        If a firmware update is still running, ripping out the websocket would
-        kill the keep-awake loop and abort the transfer. Wait briefly for the
-        install to finish before tearing down.
-        """
-        if self._installing:
+        """Tear down the connection and stop any keep-awake loops."""
+        if self._keepalive_tasks:
             _LOGGER.warning(
-                "Disconnecting while a firmware update is in progress for node(s) "
-                "%s; waiting for it to finish to avoid aborting the transfer",
-                ", ".join(str(n) for n in self._installing),
+                "Disconnecting while keeping node(s) %s awake for a firmware "
+                "update; the transfer may stall until it is retried",
+                ", ".join(str(n) for n in self._keepalive_tasks),
             )
+        for stop in list(self._keepalive_stops.values()):
+            stop.set()
+        for task in list(self._keepalive_tasks.values()):
+            task.cancel()
             try:
-                async with asyncio.timeout(DISCONNECT_INSTALL_GRACE):
-                    async with self._install_lock:
-                        pass
-            except asyncio.TimeoutError:
-                _LOGGER.warning(
-                    "Firmware update still running after %ss; tearing down anyway",
-                    DISCONNECT_INSTALL_GRACE,
-                )
+                await task
+            except (asyncio.CancelledError, MatterError):
+                pass
+        self._keepalive_tasks.clear()
+        self._keepalive_stops.clear()
 
         if self._unsub_events is not None:
             self._unsub_events()
@@ -159,13 +160,16 @@ class BilresaManager:
     # ------------------------------------------------------------------
     @callback
     def _handle_event(self, event: EventType, data: Any) -> None:
-        """Forward Matter attribute changes to interested entities."""
+        """React to Matter attribute changes on BILRESA nodes."""
         node_id = _extract_node_id(data)
         if node_id is None:
             return
-        # Keep our cached download progress in sync for in-progress installs.
-        if node_id in self._installing:
-            self._progress[node_id] = self._read_update_progress(node_id)
+        # Start/stop the keep-awake loop based on the device's OTA state,
+        # regardless of which controller (HA, Apple, Google...) kicked off the
+        # update. This is the integration's core job now that the native Matter
+        # update entity handles the actual download.
+        if node_id in self._bilresa_ids:
+            self._evaluate_keepawake(node_id)
         self._notify(node_id)
 
     @callback
@@ -351,13 +355,9 @@ class BilresaManager:
     # ------------------------------------------------------------------
     # OTA / ICD status helpers (read from the live node cache)
     # ------------------------------------------------------------------
-    def is_installing(self, node_id: int) -> bool:
-        return node_id in self._installing
-
-    def get_progress(self, node_id: int) -> float | None:
-        if node_id not in self._installing:
-            return None
-        return self._progress.get(node_id) or self._read_update_progress(node_id)
+    def is_keeping_awake(self, node_id: int) -> bool:
+        """Return True while we are actively holding the device in active mode."""
+        return node_id in self._keepalive_tasks
 
     def get_update_state_name(self, node_id: int) -> str | None:
         node = self._safe_node(node_id)
@@ -387,20 +387,6 @@ class BilresaManager:
     def get_last_promised_duration(self, node_id: int) -> int | None:
         return self._last_promised.get(node_id)
 
-    def _read_update_progress(self, node_id: int) -> float | None:
-        node = self._safe_node(node_id)
-        if node is None:
-            return None
-        value = self._read_attribute(
-            node_id,
-            self._ota_endpoint(node),
-            clusters.OtaSoftwareUpdateRequestor,
-            clusters.OtaSoftwareUpdateRequestor.Attributes.UpdateStateProgress,
-        )
-        if value is None:
-            return None
-        return float(value)
-
     def _safe_node(self, node_id: int) -> Any | None:
         try:
             return self._get_node(node_id)
@@ -421,84 +407,64 @@ class BilresaManager:
             return None
 
     # ------------------------------------------------------------------
-    # Update check / install
+    # Auto keep-awake driver (reacts to OTA UpdateState changes)
     # ------------------------------------------------------------------
-    async def check_update(self, node_id: int) -> Any:
-        """Query the DCL (and local sources) for the latest applicable image."""
-        if self.client is None:
-            raise BilresaConnectionError("Matter Server not connected")
-        return await self.client.check_node_update(node_id=node_id)
+    @callback
+    def _evaluate_keepawake(self, node_id: int) -> None:
+        """Start or stop the keep-awake loop based on the device's OTA state."""
+        state = self.get_update_state_name(node_id)
+        in_progress = state is not None and state not in IDLE_OTA_STATES
+        if in_progress and node_id not in self._keepalive_tasks:
+            self._start_keepawake(node_id, state)
+        elif not in_progress and node_id in self._keepalive_tasks:
+            self._stop_keepawake(node_id)
 
-    async def install(self, node_id: int, software_version: int | str | None) -> None:
-        """Run an OTA update while keeping the sleepy device awake.
-
-        ``update_node`` performs the heavy lifting on the server (ephemeral OTA
-        Provider + BDX transfer). We run a ``StayActiveRequest`` loop alongside
-        it so a SIT ICD does not drop back to slow polling mid-transfer.
-        """
-        if self.client is None:
-            raise BilresaConnectionError("Matter Server not connected")
-
+    @callback
+    def _start_keepawake(self, node_id: int, state: str | None) -> None:
+        """Begin holding a node in active mode for the duration of an update."""
+        _LOGGER.info(
+            "Firmware update detected on BILRESA node %s (state: %s); starting "
+            "keep-awake loop",
+            node_id,
+            state,
+        )
         battery = self.get_battery_percent(node_id)
         if battery is not None and battery < MIN_BATTERY_PERCENT:
-            raise HomeAssistantError(
-                f"Battery too low for firmware update ({battery}%) - replace the "
-                f"batteries first (minimum {MIN_BATTERY_PERCENT}%)"
+            _LOGGER.warning(
+                "BILRESA node %s battery is low (%s%%) during a firmware update; "
+                "a flash interrupted by a dying battery can brick the device",
+                node_id,
+                battery,
             )
+        stop_event = asyncio.Event()
+        self._keepalive_stops[node_id] = stop_event
+        self._keepalive_tasks[node_id] = self.hass.async_create_background_task(
+            self._keepawake_runner(node_id, stop_event),
+            f"{LISTEN_TASK_NAME}_keepawake_{node_id}",
+        )
+        self._notify(node_id)
 
-        state = self.get_update_state_name(node_id)
-        if state in ACTIVE_OTA_STATES:
-            raise HomeAssistantError(
-                f"A firmware update is already in progress for device {node_id} "
-                f"(state: {state})"
-            )
+    @callback
+    def _stop_keepawake(self, node_id: int) -> None:
+        """Signal the keep-awake loop for a node to stop."""
+        _LOGGER.info(
+            "Firmware update on BILRESA node %s finished; stopping keep-awake loop",
+            node_id,
+        )
+        stop_event = self._keepalive_stops.get(node_id)
+        if stop_event is not None:
+            stop_event.set()
 
-        if software_version is None:
-            update = await self.check_update(node_id)
-            if update is None:
-                raise HomeAssistantError("No firmware update available for this device")
-            software_version = update.software_version
-
-        async with self._install_lock:
-            self._installing.add(node_id)
-            self._progress[node_id] = None
-            self._notify(node_id)
-            stop_event = asyncio.Event()
-            keep_task = self.hass.async_create_task(
-                self._keep_awake_loop(node_id, stop_event),
-                f"{LISTEN_TASK_NAME}_keepawake_{node_id}",
-            )
-            try:
-                await self.client.update_node(
-                    node_id=node_id, software_version=software_version
-                )
-            except UpdateError as err:
-                raise HomeAssistantError(
-                    await self._describe_update_failure(node_id, err)
-                ) from err
-            finally:
-                stop_event.set()
-                await keep_task
-                self._installing.discard(node_id)
-                self._progress.pop(node_id, None)
-                self._notify(node_id)
-
-    async def _describe_update_failure(self, node_id: int, err: Exception) -> str:
-        """Augment an update failure with reachability diagnostics."""
-        detail = str(err)
-        if self.client is None:
-            return detail
+    async def _keepawake_runner(
+        self, node_id: int, stop_event: asyncio.Event
+    ) -> None:
+        """Run the keep-awake loop and clean up bookkeeping when it ends."""
         try:
-            results = await self.client.ping_node(node_id)
-        except (MatterError, NodeNotReady):
-            return detail
-        reachable = [addr for addr, ok in results.items() if ok]
-        if not reachable:
-            return (
-                f"{detail} (device {node_id} is not reachable on any address - "
-                "check Thread/IPv6 connectivity)"
-            )
-        return f"{detail} (device reachable at: {', '.join(reachable)})"
+            await self._keep_awake_loop(node_id, stop_event)
+        finally:
+            self._keepalive_tasks.pop(node_id, None)
+            self._keepalive_stops.pop(node_id, None)
+            self._notify(node_id)
 
     # ------------------------------------------------------------------
     # Keep-awake (ICD StayActiveRequest)

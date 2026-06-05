@@ -32,18 +32,27 @@ equivalent of holding the remote awake.
 
 ## How it works
 
-```
-Home Assistant (this integration)
-  └─ websocket client ─► Matter Server (python-matter-server)
-                              ├─ check_node_update  ─► CSA DCL (find latest .ota)
-                              ├─ update_node        ─► ephemeral OTA Provider + BDX
-                              └─ StayActiveRequest   ─► keeps the BILRESA awake
-                                        (issued on a loop by this integration)
-```
+This integration does **not** add its own update button. Home Assistant's
+built-in Matter integration already provides a working firmware **Update** entity
+for the BILRESA (it talks to the CSA DCL and runs the OTA Provider). The only
+thing it lacks is keeping the sleepy device awake.
 
-The integration connects to your existing Matter Server as a *second* websocket
-client (the server is designed for multiple consumers), so it shares the same
-fabric and OTA Provider as Home Assistant's own Matter integration.
+So this integration runs purely in the background: it connects to your Matter
+Server as a *second* websocket client, watches each BILRESA's OTA `UpdateState`,
+and the moment an update starts (from the native button, Apple Home, Google,
+etc.) it fires the `StayActiveRequest` keep-awake loop until the transfer
+finishes.
+
+```
+You press the native "Firmware" Update button (or any controller starts an OTA)
+        │
+        ▼
+Matter Server (python-matter-server) runs the OTA Provider + BDX transfer
+        │  OTA UpdateState -> querying/downloading/applying
+        ▼
+this integration (watching UpdateState) ──► StayActiveRequest loop ──► BILRESA
+                                            (re-armed until state returns to idle)
+```
 
 ## Requirements
 
@@ -64,14 +73,16 @@ fabric and OTA Provider as Home Assistant's own Matter integration.
 
 ## What you get
 
-For each discovered BILRESA remote:
+To update, use the **Firmware** Update entity that the official Matter
+integration already exposes on the device. This integration adds, on that same
+device:
 
-- An **Update** entity. Press *Install* to update; progress is read live from the
-  device's OTA Requestor cluster and the keep-awake loop runs automatically.
-- Diagnostic **sensors**: OTA update state, ICD operating mode (SIT/LIT), and the
-  last promised active duration.
-- **Buttons**: *Keep awake now* (send a single `StayActiveRequest`) and
-  *Retry firmware update* (re-announce the OTA Provider).
+- A **Keep-awake active** binary sensor (on while it is holding the device awake
+  for an OTA).
+- Diagnostic **sensors**: OTA update state, ICD operating mode (SIT/LIT), battery
+  level, and the last promised active duration.
+- A **Keep awake now** button (sends a single `StayActiveRequest`) for manual
+  nudging or testing.
 
 ## Limitations & notes
 

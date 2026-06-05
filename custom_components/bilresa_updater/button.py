@@ -26,23 +26,12 @@ async def _keep_awake(manager: BilresaManager, node_id: int) -> None:
     await manager.keep_awake_once(node_id)
 
 
-async def _retry_update(manager: BilresaManager, node_id: int) -> None:
-    # Re-run the OTA flow (re-announces the provider) using the latest image.
-    await manager.install(node_id, None)
-
-
 BUTTONS: tuple[BilresaButtonDescription, ...] = (
     BilresaButtonDescription(
         key="keep_awake",
         translation_key="keep_awake",
         entity_category=EntityCategory.CONFIG,
         press_fn=_keep_awake,
-    ),
-    BilresaButtonDescription(
-        key="retry_update",
-        translation_key="retry_update",
-        entity_category=EntityCategory.CONFIG,
-        press_fn=_retry_update,
     ),
 )
 

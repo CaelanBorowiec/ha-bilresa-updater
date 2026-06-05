@@ -44,10 +44,6 @@ KEEP_AWAKE_MIN_INTERVAL: Final = 4
 # Used when the device does not return a usable PromisedActiveDuration.
 KEEP_AWAKE_FALLBACK_INTERVAL: Final = 20
 
-# Seconds to wait for an in-flight firmware update to finish before tearing
-# down the connection on unload/disconnect.
-DISCONNECT_INSTALL_GRACE: Final = 30
-
 # Background task names.
 LISTEN_TASK_NAME: Final = "bilresa_updater_matter_listen"
 
@@ -63,12 +59,11 @@ OTA_UPDATE_STATE_NAMES: Final[dict[int, str]] = {
     7: "delayed_on_apply",
 }
 
-# OtaSoftwareUpdateRequestor UpdateState names that indicate an active transfer.
-# Starting a new install while in one of these states would re-announce the
-# provider mid-flight, so we refuse.
-ACTIVE_OTA_STATES: Final[frozenset[str]] = frozenset(
-    {"downloading", "applying", "rolling_back", "delayed_on_apply"}
-)
+# UpdateState names that mean nothing is happening. Any state NOT in this set
+# means a firmware transfer is underway and the sleepy device must be held in
+# active mode. We deliberately treat "querying"/"delayed_on_query" as active so
+# the keep-awake loop starts before the stall-prone querying -> idle window.
+IDLE_OTA_STATES: Final[frozenset[str]] = frozenset({"unknown", "idle"})
 
 # ICD Management OperatingMode enum.
 ICD_OPERATING_MODE_NAMES: Final[dict[int, str]] = {
