@@ -2,12 +2,12 @@
   "domain": "bilresa_updater",
   "name": "IKEA BILRESA Firmware Updater",
   "after_dependencies": ["matter"],
-  "codeowners": ["@Caelan"],
+  "codeowners": ["@CaelanBorowiec"],
   "config_flow": true,
-  "documentation": "https://github.com/Caelan/ha-bilresa-updater",
+  "documentation": "https://github.com/CaelanBorowiec/ha-bilresa-updater",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/Caelan/ha-bilresa-updater/issues",
+  "issue_tracker": "https://github.com/CaelanBorowiec/ha-bilresa-updater/issues",
   "requirements": [],
   "version": "0.1.0"
 }
