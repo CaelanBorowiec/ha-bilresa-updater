@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icon.png" alt="IKEA BILRESA remote" width="200">
+</p>
+
 # IKEA BILRESA Firmware Updater (HACS)
 
 A Home Assistant custom integration that updates **IKEA BILRESA** Matter-over-Thread
