@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "IKEA BILRESA Firmware Updater",
+        "description": "Connect to your Home Assistant Matter Server. The URL is pre-filled from your existing Matter integration when available.",
+        "data": {
+          "url": "Matter Server URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the Matter Server at the given URL.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "IKEA BILRESA Firmware Updater is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "ota_state": {
+        "name": "OTA update state",
+        "state": {
+          "unknown": "Unknown",
+          "idle": "Idle",
+          "querying": "Querying",
+          "delayed_on_query": "Delayed on query",
+          "downloading": "Downloading",
+          "applying": "Applying",
+          "rolling_back": "Rolling back",
+          "delayed_on_apply": "Delayed on apply"
+        }
+      },
+      "icd_mode": {
+        "name": "ICD operating mode",
+        "state": {
+          "SIT": "Short Idle Time",
+          "LIT": "Long Idle Time"
+        }
+      },
+      "promised_active": {
+        "name": "Last promised active duration"
+      }
+    },
+    "button": {
+      "keep_awake": {
+        "name": "Keep awake now"
+      },
+      "retry_update": {
+        "name": "Retry firmware update"
+      }
+    }
+  }
+}
