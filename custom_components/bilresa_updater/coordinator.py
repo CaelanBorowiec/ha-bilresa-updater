@@ -74,6 +74,19 @@ class BilresaManager:
         # Active keep-awake loops, keyed by node id.
         self._keepalive_tasks: dict[int, asyncio.Task[None]] = {}
         self._keepalive_stops: dict[int, asyncio.Event] = {}
+        # #region agent log
+        self._dbg_last_state: dict[int, str | None] = {}
+        # #endregion
+
+    # #region agent log
+    def _dbg(self, location: str, message: str, data: dict, hypothesis: str) -> None:
+        try:
+            import json as _json, time as _time
+            with open(self.hass.config.path("debug-81fb06.log"), "a", encoding="utf-8") as _f:
+                _f.write(_json.dumps({"sessionId": "81fb06", "timestamp": int(_time.time() * 1000), "location": location, "message": message, "data": data, "hypothesisId": hypothesis}) + "\n")
+        except Exception:
+            pass
+    # #endregion
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -108,6 +121,9 @@ class BilresaManager:
         )
 
         self._bilresa_ids = set(self.get_bilresa_node_ids())
+        # #region agent log
+        self._dbg("coordinator.py:async_connect", "connected; BILRESA nodes discovered", {"bilresa_ids": sorted(self._bilresa_ids), "states": {n: self.get_update_state_name(n) for n in self._bilresa_ids}, "sw_versions": {n: self.get_software_version_string(n) for n in self._bilresa_ids}}, "H-D")
+        # #endregion
         # In case an update is already mid-flight when we start up, evaluate now.
         for node_id in self._bilresa_ids:
             self._evaluate_keepawake(node_id)
@@ -413,6 +429,11 @@ class BilresaManager:
     def _evaluate_keepawake(self, node_id: int) -> None:
         """Start or stop the keep-awake loop based on the device's OTA state."""
         state = self.get_update_state_name(node_id)
+        # #region agent log
+        if self._dbg_last_state.get(node_id, "__unset__") != state:
+            self._dbg("coordinator.py:_evaluate_keepawake", "OTA UpdateState changed", {"node_id": node_id, "state": state, "prev": self._dbg_last_state.get(node_id), "loop_running": node_id in self._keepalive_tasks, "operating_mode": self.get_operating_mode(node_id)}, "H-C,H-D")
+            self._dbg_last_state[node_id] = state
+        # #endregion
         in_progress = state is not None and state not in IDLE_OTA_STATES
         if in_progress and node_id not in self._keepalive_tasks:
             self._start_keepawake(node_id, state)
@@ -436,6 +457,9 @@ class BilresaManager:
                 node_id,
                 battery,
             )
+        # #region agent log
+        self._dbg("coordinator.py:_start_keepawake", "starting keep-awake loop", {"node_id": node_id, "state": state, "battery": battery, "sw_version": self.get_software_version_string(node_id)}, "H-C")
+        # #endregion
         stop_event = asyncio.Event()
         self._keepalive_stops[node_id] = stop_event
         self._keepalive_tasks[node_id] = self.hass.async_create_background_task(
@@ -451,6 +475,9 @@ class BilresaManager:
             "Firmware update on BILRESA node %s finished; stopping keep-awake loop",
             node_id,
         )
+        # #region agent log
+        self._dbg("coordinator.py:_stop_keepawake", "OTA returned to idle; stopping loop", {"node_id": node_id, "state": self.get_update_state_name(node_id), "sw_version": self.get_software_version_string(node_id)}, "H-C")
+        # #endregion
         stop_event = self._keepalive_stops.get(node_id)
         if stop_event is not None:
             stop_event.set()
@@ -484,7 +511,13 @@ class BilresaManager:
             clusters.IcdManagement.Attributes.AcceptedCommandList,
         )
         if not accepted:
+            # #region agent log
+            self._dbg("coordinator.py:supports_stay_active", "AcceptedCommandList empty/unreadable", {"node_id": node_id, "accepted": accepted}, "H-E")
+            # #endregion
             return False
+        # #region agent log
+        self._dbg("coordinator.py:supports_stay_active", "AcceptedCommandList read", {"node_id": node_id, "accepted": list(accepted), "supports_stay_active": STAY_ACTIVE_REQUEST_COMMAND_ID in accepted}, "H-E")
+        # #endregion
         return STAY_ACTIVE_REQUEST_COMMAND_ID in accepted
 
     def get_user_active_mode_instruction(self, node_id: int) -> Any:
@@ -510,8 +543,14 @@ class BilresaManager:
             )
         except (MatterError, NodeNotReady) as err:
             _LOGGER.debug("StayActiveRequest failed for node %s: %s", node_id, err)
+            # #region agent log
+            self._dbg("coordinator.py:keep_awake_once", "StayActiveRequest FAILED", {"node_id": node_id, "error": str(err), "error_type": type(err).__name__}, "H-B")
+            # #endregion
             return None
         promised = getattr(response, "promisedActiveDuration", None)
+        # #region agent log
+        self._dbg("coordinator.py:keep_awake_once", "StayActiveRequest OK", {"node_id": node_id, "promised_active_duration_ms": promised, "requested_ms": KEEP_AWAKE_DURATION_MS, "operating_mode": self.get_operating_mode(node_id), "response_type": type(response).__name__, "response_repr": repr(response)[:400]}, "H-A,H-F")
+        # #endregion
         self._last_promised[node_id] = promised
         self._notify(node_id)
         return promised
@@ -520,6 +559,9 @@ class BilresaManager:
         """Hold the device in active mode until ``stop_event`` is set."""
         if not await self.supports_stay_active(node_id):
             instruction = self.get_user_active_mode_instruction(node_id)
+            # #region agent log
+            self._dbg("coordinator.py:_keep_awake_loop", "StayActiveRequest NOT supported; loop exiting immediately", {"node_id": node_id, "instruction": str(instruction)}, "H-E")
+            # #endregion
             _LOGGER.warning(
                 "Node %s does not support StayActiveRequest; the firmware "
                 "transfer may stall. Tap the remote's active-mode button to "
@@ -551,6 +593,9 @@ class BilresaManager:
                 )
             else:
                 interval = KEEP_AWAKE_FALLBACK_INTERVAL
+            # #region agent log
+            self._dbg("coordinator.py:_keep_awake_loop", "loop iteration; re-arming", {"node_id": node_id, "promised_ms": promised, "next_interval_s": interval, "ota_state": self.get_update_state_name(node_id)}, "H-C")
+            # #endregion
             try:
                 async with asyncio.timeout(interval):
                     await stop_event.wait()
