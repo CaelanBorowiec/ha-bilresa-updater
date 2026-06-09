@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
@@ -72,7 +73,7 @@ class BilresaManager:
         self._fallback_interval = fallback_interval
         self.client: MatterClient | None = None
         self._listen_task: asyncio.Task[None] | None = None
-        self._unsub_events: Callable[[], None] | None = None
+        self._unsub_events: list[Callable[[], None]] = []
         self._last_promised: dict[int, int | None] = {}
         self._listeners: dict[int, list[Callable[[], None]]] = {}
         # Node ids recognised as BILRESA remotes (populated on connect).
@@ -136,9 +137,6 @@ class BilresaManager:
                 "Timed out waiting for the Matter Server node list"
             ) from err
 
-        self._unsub_events = self.client.subscribe_events(
-            self._handle_event, event_filter=EventType.ATTRIBUTE_UPDATED
-        )
         # #region agent log
         try:
             self._unsub_dbg_all = self.client.subscribe_events(self._dbg_any_event)
@@ -148,6 +146,18 @@ class BilresaManager:
         # #endregion
 
         self._bilresa_ids = set(self.get_bilresa_node_ids())
+        # The Matter Server client routes events via subscription filters and
+        # passes only the new attribute value to the callback (verified at
+        # runtime), so the node id must be bound at subscription time -- one
+        # subscription per BILRESA node.
+        for node_id in self._bilresa_ids:
+            self._unsub_events.append(
+                self.client.subscribe_events(
+                    partial(self._handle_node_event, node_id),
+                    event_filter=EventType.ATTRIBUTE_UPDATED,
+                    node_filter=node_id,
+                )
+            )
         # #region agent log
         self._dbg("coordinator.py:async_connect", "connected; BILRESA nodes discovered", {"bilresa_ids": sorted(self._bilresa_ids), "states": {n: self.get_update_state_name(n) for n in self._bilresa_ids}, "sw_versions": {n: self.get_software_version_string(n) for n in self._bilresa_ids}}, "H-D")
         # #endregion
@@ -198,9 +208,9 @@ class BilresaManager:
         self._keepalive_tasks.clear()
         self._keepalive_stops.clear()
 
-        if self._unsub_events is not None:
-            self._unsub_events()
-            self._unsub_events = None
+        for unsub in self._unsub_events:
+            unsub()
+        self._unsub_events.clear()
         # #region agent log
         if self._unsub_dbg_all is not None:
             self._unsub_dbg_all()
@@ -221,22 +231,22 @@ class BilresaManager:
     # Events / listeners
     # ------------------------------------------------------------------
     @callback
-    def _handle_event(self, event: EventType, data: Any) -> None:
-        """React to Matter attribute changes on BILRESA nodes."""
+    def _handle_node_event(self, node_id: int, event: EventType, data: Any) -> None:
+        """React to an attribute change on a specific BILRESA node.
+
+        The node id is bound via ``partial`` at subscription time because the
+        Matter Server client only passes the new attribute value as ``data``.
+        """
         # #region agent log
         self._dbg_evt_count += 1
         if self._dbg_evt_count <= 10 or self._dbg_evt_count % 100 == 0:
-            self._dbg("coordinator.py:_handle_event", "ATTRIBUTE_UPDATED delivered to handler", {"count": self._dbg_evt_count, "event": str(event), "data_type": type(data).__name__, "data_repr": repr(data)[:300], "extracted_node_id": _extract_node_id(data)}, "H-H1,H-H2")
+            self._dbg("coordinator.py:_handle_node_event", "node-filtered ATTRIBUTE_UPDATED delivered", {"count": self._dbg_evt_count, "node_id": node_id, "event": str(event), "data_repr": repr(data)[:200]}, "H-H1")
         # #endregion
-        node_id = _extract_node_id(data)
-        if node_id is None:
-            return
         # Start/stop the keep-awake loop based on the device's OTA state,
         # regardless of which controller (HA, Apple, Google...) kicked off the
         # update. This is the integration's core job now that the native Matter
         # update entity handles the actual download.
-        if node_id in self._bilresa_ids:
-            self._evaluate_keepawake(node_id)
+        self._evaluate_keepawake(node_id)
         self._notify(node_id)
 
     @callback
@@ -592,7 +602,12 @@ class BilresaManager:
             self._dbg("coordinator.py:keep_awake_once", "StayActiveRequest FAILED", {"node_id": node_id, "error": str(err), "error_type": type(err).__name__}, "H-B")
             # #endregion
             return None
-        promised = getattr(response, "promisedActiveDuration", None)
+        # The Matter Server websocket API returns command responses as plain
+        # dicts (verified at runtime: {'promisedActiveDuration': 30000}).
+        if isinstance(response, dict):
+            promised = response.get("promisedActiveDuration")
+        else:
+            promised = getattr(response, "promisedActiveDuration", None)
         # #region agent log
         self._dbg("coordinator.py:keep_awake_once", "StayActiveRequest OK", {"node_id": node_id, "promised_active_duration_ms": promised, "requested_ms": KEEP_AWAKE_DURATION_MS, "operating_mode": self.get_operating_mode(node_id), "response_type": type(response).__name__, "response_repr": repr(response)[:400]}, "H-A,H-F")
         # #endregion
@@ -651,19 +666,6 @@ def _clean_name(name: Any) -> str | None:
         return None
     cleaned = str(name).replace("\x00", "").strip()
     return cleaned or None
-
-
-@callback
-def _extract_node_id(data: Any) -> int | None:
-    """Best-effort extraction of the node id from an event payload."""
-    if isinstance(data, (list, tuple)) and data:
-        first = data[0]
-        if isinstance(first, int):
-            return first
-    node_id = getattr(data, "node_id", None)
-    if isinstance(node_id, int):
-        return node_id
-    return None
 
 
 def discover_matter_url(hass: HomeAssistant) -> str | None:

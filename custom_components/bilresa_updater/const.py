@@ -39,7 +39,10 @@ MIN_BATTERY_PERCENT: Final = 20
 # Duration (ms) we ask the ICD to remain in active mode on each request.
 KEEP_AWAKE_DURATION_MS: Final = 60_000
 # Re-issue the request once this fraction of the promised duration has elapsed.
-KEEP_AWAKE_REARM_RATIO: Final = 0.75
+# 0.5 of the BILRESA's 30s promise = 15s cadence. Runtime logs showed a
+# StayActiveRequest exchange can take ~18s under RF stress, which at a 0.75
+# ratio left an uncovered window where the promise expired mid-download.
+KEEP_AWAKE_REARM_RATIO: Final = 0.5
 # Never re-arm faster than this (seconds) to avoid hammering a sleepy device.
 KEEP_AWAKE_MIN_INTERVAL: Final = 4
 # Used when the device does not return a usable PromisedActiveDuration.

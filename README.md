@@ -107,11 +107,17 @@ mode) on a live Matter fabric:
   to `idle` mid-transfer (the stall signature this integration prevents).
 - The manual **Keep awake now** button sends the same command and is likewise
   accepted by the device.
-- Known issue under investigation: the `PromisedActiveDuration` returned by
-  the device is not currently parsed from the command response, so the *Last
-  promised active duration* sensor shows *Unknown* and the loop always uses
-  the configurable fallback interval rather than adapting to the device's
-  promise. The keep-awake itself is unaffected.
+- The BILRESA returns a `PromisedActiveDuration` of **30 seconds** per
+  request. The keep-awake loop re-arms at 75% of that promise (~22.5 s), and
+  the *Last promised active duration* sensor reflects the device's response.
+- OTA state transitions (`idle -> querying -> downloading -> ... -> idle`) are
+  detected in real time via per-node Matter Server event subscriptions, so the
+  keep-awake loop starts the moment any controller begins an update and stops
+  as soon as the device returns to idle.
+- A Thread radio dropout mid-transfer can still abort a download (the device
+  then restarts it from 0% on the next retry); keep-awake greatly reduces but
+  cannot fully eliminate this. The loop absorbs transient ~1 minute dropouts
+  and keeps re-arming.
 
 ## Limitations & notes
 
