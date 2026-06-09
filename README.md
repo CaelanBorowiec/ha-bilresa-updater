@@ -79,8 +79,8 @@ device:
 
 - A **Keep-awake active** binary sensor (on while it is holding the device awake
   for an OTA).
-- Diagnostic **sensors**: OTA update state, ICD operating mode (SIT/LIT), battery
-  level, and the last promised active duration.
+- Diagnostic **sensors**: OTA update state, ICD operating mode (SIT/LIT), and the
+  last promised active duration.
 - A **Keep awake now** button (sends a single `StayActiveRequest`) for manual
   nudging or testing.
 

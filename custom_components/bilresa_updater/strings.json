@@ -41,9 +41,6 @@
       },
       "promised_active": {
         "name": "Last promised active duration"
-      },
-      "battery": {
-        "name": "Battery"
       }
     },
     "button": {
