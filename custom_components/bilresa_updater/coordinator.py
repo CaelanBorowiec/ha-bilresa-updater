@@ -29,11 +29,11 @@ from chip.clusters import Objects as clusters
 
 from .const import (
     CONF_URL,
+    DEFAULT_KEEP_AWAKE_FALLBACK_INTERVAL,
     ICD_OPERATING_MODE_NAMES,
     IDLE_OTA_STATES,
     IKEA_VENDOR_ID,
     KEEP_AWAKE_DURATION_MS,
-    KEEP_AWAKE_FALLBACK_INTERVAL,
     KEEP_AWAKE_MIN_INTERVAL,
     KEEP_AWAKE_REARM_RATIO,
     LISTEN_TASK_NAME,
@@ -60,10 +60,16 @@ class BilresaManager:
     same fabric and OTA Provider.
     """
 
-    def __init__(self, hass: HomeAssistant, url: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        url: str,
+        fallback_interval: int = DEFAULT_KEEP_AWAKE_FALLBACK_INTERVAL,
+    ) -> None:
         """Initialize the manager."""
         self.hass = hass
         self.url = url
+        self._fallback_interval = fallback_interval
         self.client: MatterClient | None = None
         self._listen_task: asyncio.Task[None] | None = None
         self._unsub_events: Callable[[], None] | None = None
@@ -583,7 +589,7 @@ class BilresaManager:
                     "Keep-awake request for node %s failed (%s); retrying in %ss",
                     node_id,
                     err,
-                    KEEP_AWAKE_FALLBACK_INTERVAL,
+                    self._fallback_interval,
                 )
                 promised = None
             if promised:
@@ -592,7 +598,7 @@ class BilresaManager:
                     (promised / 1000) * KEEP_AWAKE_REARM_RATIO,
                 )
             else:
-                interval = KEEP_AWAKE_FALLBACK_INTERVAL
+                interval = self._fallback_interval
             # #region agent log
             self._dbg("coordinator.py:_keep_awake_loop", "loop iteration; re-arming", {"node_id": node_id, "promised_ms": promised, "next_interval_s": interval, "ota_state": self.get_update_state_name(node_id)}, "H-C")
             # #endregion

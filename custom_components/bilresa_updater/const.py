@@ -11,6 +11,7 @@ MATTER_DOMAIN: Final = "matter"
 
 # Config keys.
 CONF_URL: Final = "url"
+CONF_FALLBACK_INTERVAL: Final = "fallback_interval"
 
 # Default Matter Server websocket URL (matches the official add-on default).
 DEFAULT_MATTER_URL: Final = "ws://localhost:5580/ws"
@@ -42,7 +43,12 @@ KEEP_AWAKE_REARM_RATIO: Final = 0.75
 # Never re-arm faster than this (seconds) to avoid hammering a sleepy device.
 KEEP_AWAKE_MIN_INTERVAL: Final = 4
 # Used when the device does not return a usable PromisedActiveDuration.
-KEEP_AWAKE_FALLBACK_INTERVAL: Final = 20
+# User-configurable via the integration options (CONF_FALLBACK_INTERVAL);
+# field reports suggest 10-15s is more reliable than 20s on BILRESA.
+DEFAULT_KEEP_AWAKE_FALLBACK_INTERVAL: Final = 15
+# Bounds for the user-configurable fallback interval (seconds).
+MIN_FALLBACK_INTERVAL: Final = 4
+MAX_FALLBACK_INTERVAL: Final = 60
 
 # Background task names.
 LISTEN_TASK_NAME: Final = "bilresa_updater_matter_listen"

@@ -84,6 +84,35 @@ device:
 - A **Keep awake now** button (sends a single `StayActiveRequest`) for manual
   nudging or testing.
 
+## Configuration
+
+In the integration's **Configure** dialog you can tune the keep-awake re-send
+interval (default: 15 seconds, range 4–60). This is how often the integration
+re-sends `StayActiveRequest` during an update when the device does not report
+a usable `PromisedActiveDuration`. Field reports suggest 10–15 s is more
+reliable than longer intervals; lower values use slightly more battery.
+
+## Testing & findings
+
+Verified against real BILRESA hardware (firmware 1.8.5, Long Idle Time ICD
+mode) on a live Matter fabric:
+
+- The BILRESA advertises `StayActiveRequest` (command `0x03`) in its ICD
+  Management `AcceptedCommandList`, so the keep-awake mechanism is supported
+  by the device, not just attempted blindly.
+- The integration correctly detects an in-progress OTA (even one started
+  before the integration loads) and starts the keep-awake loop immediately.
+- During a multi-minute `downloading` phase, every `StayActiveRequest` was
+  accepted by the device with no errors, and the OTA state did not bounce back
+  to `idle` mid-transfer (the stall signature this integration prevents).
+- The manual **Keep awake now** button sends the same command and is likewise
+  accepted by the device.
+- Known issue under investigation: the `PromisedActiveDuration` returned by
+  the device is not currently parsed from the command response, so the *Last
+  promised active duration* sensor shows *Unknown* and the loop always uses
+  the configurable fallback interval rather than adapting to the device's
+  promise. The keep-awake itself is unaffected.
+
 ## Limitations & notes
 
 - `StayActiveRequest` is optional in the Matter spec. If a device does not accept

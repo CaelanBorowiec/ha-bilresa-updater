@@ -17,6 +17,17 @@
       "already_configured": "IKEA BILRESA Firmware Updater is already configured."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Keep-awake tuning",
+        "description": "How often (in seconds) to re-send StayActiveRequest while a firmware update is running, when the device does not report a promised active duration. Lower values keep the remote awake more reliably but use slightly more battery.",
+        "data": {
+          "fallback_interval": "Keep-awake re-send interval (seconds)"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "ota_state": {
