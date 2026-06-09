@@ -67,6 +67,6 @@ IDLE_OTA_STATES: Final[frozenset[str]] = frozenset({"unknown", "idle"})
 
 # ICD Management OperatingMode enum.
 ICD_OPERATING_MODE_NAMES: Final[dict[int, str]] = {
-    0: "SIT",
-    1: "LIT",
+    0: "sit",
+    1: "lit",
 }

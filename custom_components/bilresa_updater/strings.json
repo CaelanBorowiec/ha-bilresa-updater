@@ -35,8 +35,8 @@
       "icd_mode": {
         "name": "ICD operating mode",
         "state": {
-          "SIT": "Short Idle Time",
-          "LIT": "Long Idle Time"
+          "sit": "Short Idle Time",
+          "lit": "Long Idle Time"
         }
       },
       "promised_active": {
