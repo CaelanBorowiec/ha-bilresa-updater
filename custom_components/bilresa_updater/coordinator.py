@@ -82,6 +82,9 @@ class BilresaManager:
         self._keepalive_stops: dict[int, asyncio.Event] = {}
         # #region agent log
         self._dbg_last_state: dict[int, str | None] = {}
+        self._dbg_evt_count = 0
+        self._dbg_any_count = 0
+        self._unsub_dbg_all: Callable[[], None] | None = None
         # #endregion
 
     # #region agent log
@@ -92,6 +95,17 @@ class BilresaManager:
                 _f.write(_json.dumps({"sessionId": "81fb06", "timestamp": int(_time.time() * 1000), "location": location, "message": message, "data": data, "hypothesisId": hypothesis}) + "\n")
         except Exception:
             pass
+
+    def _dbg_any_event(self, *args: Any) -> None:
+        """Catch-all event tap (no filter) to prove whether ANY events arrive."""
+        self._dbg_any_count += 1
+        if self._dbg_any_count <= 10 or self._dbg_any_count % 100 == 0:
+            self._dbg(
+                "coordinator.py:_dbg_any_event",
+                "event received (catch-all, unfiltered)",
+                {"count": self._dbg_any_count, "args_types": [type(a).__name__ for a in args], "args_repr": repr(args)[:300]},
+                "H-H1,H-H2,H-H3",
+            )
     # #endregion
 
     # ------------------------------------------------------------------
@@ -125,6 +139,13 @@ class BilresaManager:
         self._unsub_events = self.client.subscribe_events(
             self._handle_event, event_filter=EventType.ATTRIBUTE_UPDATED
         )
+        # #region agent log
+        try:
+            self._unsub_dbg_all = self.client.subscribe_events(self._dbg_any_event)
+            self._dbg("coordinator.py:async_connect", "catch-all event tap registered", {}, "H-H1,H-H2,H-H3")
+        except Exception as err:  # noqa: BLE001
+            self._dbg("coordinator.py:async_connect", "catch-all event tap FAILED to register", {"error": str(err), "error_type": type(err).__name__}, "H-H1,H-H2,H-H3")
+        # #endregion
 
         self._bilresa_ids = set(self.get_bilresa_node_ids())
         # #region agent log
@@ -139,10 +160,24 @@ class BilresaManager:
         assert self.client is not None
         try:
             await self.client.start_listening(init_ready)
+            # #region agent log
+            self._dbg("coordinator.py:_listen", "start_listening returned normally (listener ended)", {}, "H-H3")
+            # #endregion
         except asyncio.CancelledError:
+            # #region agent log
+            self._dbg("coordinator.py:_listen", "listener cancelled (normal shutdown)", {}, "H-H3")
+            # #endregion
             raise
         except MatterError as err:
+            # #region agent log
+            self._dbg("coordinator.py:_listen", "listener DIED with MatterError", {"error": str(err)}, "H-H3")
+            # #endregion
             _LOGGER.error("Matter Server listener stopped: %s", err)
+        # #region agent log
+        except Exception as err:  # noqa: BLE001
+            self._dbg("coordinator.py:_listen", "listener DIED with unexpected error", {"error": str(err), "error_type": type(err).__name__}, "H-H3")
+            raise
+        # #endregion
 
     async def async_disconnect(self) -> None:
         """Tear down the connection and stop any keep-awake loops."""
@@ -166,6 +201,11 @@ class BilresaManager:
         if self._unsub_events is not None:
             self._unsub_events()
             self._unsub_events = None
+        # #region agent log
+        if self._unsub_dbg_all is not None:
+            self._unsub_dbg_all()
+            self._unsub_dbg_all = None
+        # #endregion
         if self._listen_task is not None:
             self._listen_task.cancel()
             try:
@@ -183,6 +223,11 @@ class BilresaManager:
     @callback
     def _handle_event(self, event: EventType, data: Any) -> None:
         """React to Matter attribute changes on BILRESA nodes."""
+        # #region agent log
+        self._dbg_evt_count += 1
+        if self._dbg_evt_count <= 10 or self._dbg_evt_count % 100 == 0:
+            self._dbg("coordinator.py:_handle_event", "ATTRIBUTE_UPDATED delivered to handler", {"count": self._dbg_evt_count, "event": str(event), "data_type": type(data).__name__, "data_repr": repr(data)[:300], "extracted_node_id": _extract_node_id(data)}, "H-H1,H-H2")
+        # #endregion
         node_id = _extract_node_id(data)
         if node_id is None:
             return
@@ -517,13 +562,7 @@ class BilresaManager:
             clusters.IcdManagement.Attributes.AcceptedCommandList,
         )
         if not accepted:
-            # #region agent log
-            self._dbg("coordinator.py:supports_stay_active", "AcceptedCommandList empty/unreadable", {"node_id": node_id, "accepted": accepted}, "H-E")
-            # #endregion
             return False
-        # #region agent log
-        self._dbg("coordinator.py:supports_stay_active", "AcceptedCommandList read", {"node_id": node_id, "accepted": list(accepted), "supports_stay_active": STAY_ACTIVE_REQUEST_COMMAND_ID in accepted}, "H-E")
-        # #endregion
         return STAY_ACTIVE_REQUEST_COMMAND_ID in accepted
 
     def get_user_active_mode_instruction(self, node_id: int) -> Any:
@@ -565,9 +604,6 @@ class BilresaManager:
         """Hold the device in active mode until ``stop_event`` is set."""
         if not await self.supports_stay_active(node_id):
             instruction = self.get_user_active_mode_instruction(node_id)
-            # #region agent log
-            self._dbg("coordinator.py:_keep_awake_loop", "StayActiveRequest NOT supported; loop exiting immediately", {"node_id": node_id, "instruction": str(instruction)}, "H-E")
-            # #endregion
             _LOGGER.warning(
                 "Node %s does not support StayActiveRequest; the firmware "
                 "transfer may stall. Tap the remote's active-mode button to "
