@@ -4,6 +4,21 @@
 
 # IKEA BILRESA Firmware Updater (HACS)
 
+<p align="center">
+  <a href="https://github.com/hacs/integration"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS Custom repository"></a>
+  <a href="https://github.com/CaelanBorowiec/ha-bilresa-updater/releases"><img src="https://img.shields.io/github/release/CaelanBorowiec/ha-bilresa-updater.svg" alt="GitHub Release"></a>
+  <a href="https://github.com/CaelanBorowiec/ha-bilresa-updater/actions/workflows/validate.yml"><img src="https://github.com/CaelanBorowiec/ha-bilresa-updater/actions/workflows/validate.yml/badge.svg" alt="Validate"></a>
+</p>
+
+<p align="center">
+  <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=CaelanBorowiec&repository=ha-bilresa-updater&category=integration">
+    <img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.">
+  </a>
+  <a href="https://my.home-assistant.io/redirect/config_flow_start/?domain=bilresa_updater">
+    <img src="https://my.home-assistant.io/badges/config_flow_start.svg" alt="Add Integration">
+  </a>
+</p>
+
 This Home Assistant custom integration assists firmware updates to IKEA BILRESA
 Matter-over-Thread remotes (dual-button and scroll-wheel variants) and reliably
 finishes the firmware transfer without making you press buttons to prevent the
@@ -69,7 +84,7 @@ To save power it polls slowly; during a firmware update it must stay in **active
 mode** (fast polling) so the Block Data Exchange transfer can run. While an
 update runs, this integration issues the Matter **`StayActiveRequest`** command
 (ICD Management cluster `0x0046`) on a timer, re-arming before each
-`PromisedActiveDuration` expires — the button-free equivalent of holding the
+`PromisedActiveDuration` expires: the button-free equivalent of holding the
 remote awake.
 
 ## Requirements
@@ -98,12 +113,38 @@ To update firmware, use the **Firmware** Update entity that the official Matter
 integration already exposes on the device. This integration adds, on that same
 device:
 
-- **Keep-awake active** binary sensor — on while holding the device awake for an
+- **Keep-awake active** binary sensor: on while holding the device awake for an
   OTA
-- Diagnostic sensors — OTA update state, ICD operating mode (SIT/LIT), and last
+- Diagnostic sensors: OTA update state, ICD operating mode (SIT/LIT), and last
   promised active duration
-- **Keep awake now** button — sends a single `StayActiveRequest` for manual
+- **Keep awake now** button: sends a single `StayActiveRequest` for manual
   nudging or testing
+
+### Tip: stay close to your parent Thread router
+
+For the fastest, most reliable update, move the BILRESA within a metre or two
+of the Thread router it is currently attached to before you start the firmware
+update. The transfer is a large download over a low-power mesh; a strong,
+direct link to the parent router means fewer hops, higher throughput, and fewer
+radio dropouts.
+
+To find which router your remote is using:
+
+1. In Home Assistant, go to **Settings → Apps → Matter Server** (or **Settings →
+   Add-ons → Matter Server** on older installs) and open the **Web UI**.
+2. Select the **Thread** tab to open the mesh topology map.
+3. Click your BILRESA node in the graph. The details panel shows its **parent
+   router** (for example your HA Connect ZBT-1/ZBT-2, IKEA Dirigera hub, Google
+   Nest Hub, or Apple HomePod) and the link quality to that router.
+4. Place the remote next to that router for the duration of the update, then
+   return it to its normal location when the OTA state returns to idle.
+
+The map is built from Matter neighbor data and can be incomplete or slow to
+refresh. If your device does not appear, reload the Thread view or check
+**Settings → Matter → Devices**, select the BILRESA, and confirm **Network
+type** is Thread. If you run the **OpenThread Border Router** add-on, you can
+also open its web UI (enable the Web UI and REST API ports in the add-on
+configuration) and use the **Topology** page as an alternative view.
 
 ## Configuration
 
