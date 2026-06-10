@@ -12,6 +12,39 @@ It works for any firmware version your device reports an update for (for example
 `1.8.5 -> 1.9.15`), because it resolves the latest applicable image from the CSA
 Distributed Compliance Ledger (DCL) rather than hard-coding versions.
 
+## What this does for you
+
+In plain terms: **BILRESA firmware updates from Home Assistant usually stall or
+fail because the remote falls asleep mid-transfer.** The known workaround is to
+stand there pressing buttons on the remote for the entire update. This
+integration does that for you, digitally — it notices an update starting (from
+HA, Apple Home, Google Home, anywhere) and keeps the remote awake until the
+update finishes. No button mashing, no babysitting.
+
+Install it once and forget it; it sits idle until a firmware update begins.
+
+## Confirmed working
+
+Verified on real BILRESA hardware (see [Testing & findings](#testing--findings)
+for details):
+
+- [x] Complete end-to-end firmware update (`1.8.5 -> 1.9.15`) via the native
+      HA Update entity, hands-free
+- [x] Device honors `StayActiveRequest` with a 30-second active-mode promise
+      per send
+- [x] Updates are detected the moment they start, from any controller, and
+      keep-awake stops as soon as the device returns to idle
+- [x] Updates already in progress are picked up after an HA restart
+- [x] Keep-awake survives transient radio dropouts and continues retrying
+      through a transfer
+- [x] **Keep awake now** button wakes the device on demand
+
+Because the firmware image is resolved from the CSA DCL at update time, this
+works for **any** BILRESA firmware version — past and future — not just the
+versions it was tested on. The keep-awake mechanism is feature-detected from
+the device (ICD `AcceptedCommandList`), so future firmware that keeps standard
+ICD behaviour will keep working.
+
 ## Why this exists
 
 The BILRESA is a battery-powered Matter **Intermittently Connected Device (ICD) /
@@ -110,8 +143,10 @@ holding the device awake:
 - The manual **Keep awake now** button sends the same command and is likewise
   accepted by the device.
 - The BILRESA returns a `PromisedActiveDuration` of **30 seconds** per
-  request. The keep-awake loop re-arms at 75% of that promise (~22.5 s), and
-  the *Last promised active duration* sensor reflects the device's response.
+  request. The keep-awake loop re-arms at 50% of that promise (~15 s) — RF
+  stress was observed delaying individual sends by up to ~18 s, so the extra
+  margin avoids gaps in active-mode coverage. The *Last promised active
+  duration* sensor reflects the device's response.
 - OTA state transitions (`idle -> querying -> downloading -> ... -> idle`) are
   detected in real time via per-node Matter Server event subscriptions, so the
   keep-awake loop starts the moment any controller begins an update and stops
