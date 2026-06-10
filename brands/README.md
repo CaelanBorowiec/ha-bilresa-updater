@@ -26,6 +26,6 @@ Assistant only show them after this is merged there:
 3. Open a PR. The CI checks square dimensions, exact sizes, and trimmed
    transparent borders.
 
-Note: brand reviewers generally expect a clean product/logo image (trimmed,
-transparent background) rather than a lifestyle photo, so the current photo
-may need replacing before the PR is accepted.
+The integration logo is a clean graphic (not the lifestyle product photo in the
+repo README). Regenerate these assets from the root `icon.png` when the logo
+changes.

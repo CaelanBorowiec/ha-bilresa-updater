@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icon.png" alt="IKEA BILRESA remote" width="200">
+  <img src="icon.png" alt="IKEA BILRESA Firmware Updater" width="200">
 </p>
 
 # IKEA BILRESA Firmware Updater (HACS)
@@ -22,6 +22,10 @@ HA, Apple Home, Google Home, anywhere) and keeps the remote awake until the
 update finishes. No button mashing, no babysitting.
 
 Install it once and forget it; it sits idle until a firmware update begins.
+
+<p align="center">
+  <img src="bilresa-product.png" alt="IKEA BILRESA remote" width="320">
+</p>
 
 ## Confirmed working
 
