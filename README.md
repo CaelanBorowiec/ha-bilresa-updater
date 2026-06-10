@@ -180,6 +180,16 @@ holding the device awake:
 - Thread / mDNS / IPv6 problems can block OTA entirely. If an update fails, check
   that the device is reachable and that the Matter Server can serve the image.
 
+## License
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+You may use, modify, and share it for non-commercial purposes. Redistributions
+must include the license and credit the original author.
+
+**Commercial use** (including use in products or services offered for a fee)
+requires a separate license. [Open an issue](https://github.com/CaelanBorowiec/ha-bilresa-updater/issues)
+to inquire.
+
 ## Disclaimer
 
 Firmware updates carry inherent risk. This is a community project and is not
