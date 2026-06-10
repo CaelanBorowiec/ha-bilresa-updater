@@ -102,6 +102,10 @@ this integration (watching UpdateState) ──► StayActiveRequest loop ──�
 
 ## Installation (HACS)
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=CaelanBorowiec&repository=ha-bilresa-updater&category=integration)
+
+Or install manually:
+
 1. In HACS, add this repository as a **custom repository** (category: *Integration*).
 2. Install **IKEA BILRESA Firmware Updater** and restart Home Assistant.
 3. Go to **Settings -> Devices & Services -> Add Integration** and search for
