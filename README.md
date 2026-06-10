@@ -182,13 +182,7 @@ holding the device awake:
 
 ## License
 
-This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
-You may use, modify, and share it for non-commercial purposes. Redistributions
-must include the license and credit the original author.
-
-**Commercial use** (including use in products or services offered for a fee)
-requires a separate license. [Open an issue](https://github.com/CaelanBorowiec/ha-bilresa-updater/issues)
-to inquire.
+This project is licensed under the [MIT License](LICENSE).
 
 ## Disclaimer
 
