@@ -94,8 +94,10 @@ reliable than longer intervals; lower values use slightly more battery.
 
 ## Testing & findings
 
-Verified against real BILRESA hardware (firmware 1.8.5, Long Idle Time ICD
-mode) on a live Matter fabric:
+Verified against real BILRESA hardware (Long Idle Time ICD mode) on a live
+Matter fabric, including a complete end-to-end firmware update (1.8.5 to
+1.9.15) driven by the native Matter Update entity with this integration
+holding the device awake:
 
 - The BILRESA advertises `StayActiveRequest` (command `0x03`) in its ICD
   Management `AcceptedCommandList`, so the keep-awake mechanism is supported
@@ -118,6 +120,12 @@ mode) on a live Matter fabric:
   then restarts it from 0% on the next retry); keep-awake greatly reduces but
   cannot fully eliminate this. The loop absorbs transient ~1 minute dropouts
   and keeps re-arming.
+- During sustained BDX transfer activity, individual `StayActiveRequest`
+  sends can fail ("Operation aborted") while the download itself continues
+  unharmed -- the transfer traffic keeps the device awake on its own. The
+  loop deliberately retries through these failures instead of giving up; in
+  the verified successful update, the download survived five minutes of such
+  failures and completed.
 
 ## Limitations & notes
 

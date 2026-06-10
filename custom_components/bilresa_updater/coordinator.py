@@ -81,33 +81,6 @@ class BilresaManager:
         # Active keep-awake loops, keyed by node id.
         self._keepalive_tasks: dict[int, asyncio.Task[None]] = {}
         self._keepalive_stops: dict[int, asyncio.Event] = {}
-        # #region agent log
-        self._dbg_last_state: dict[int, str | None] = {}
-        self._dbg_evt_count = 0
-        self._dbg_any_count = 0
-        self._unsub_dbg_all: Callable[[], None] | None = None
-        # #endregion
-
-    # #region agent log
-    def _dbg(self, location: str, message: str, data: dict, hypothesis: str) -> None:
-        try:
-            import json as _json, time as _time
-            with open(self.hass.config.path("debug-81fb06.log"), "a", encoding="utf-8") as _f:
-                _f.write(_json.dumps({"sessionId": "81fb06", "timestamp": int(_time.time() * 1000), "location": location, "message": message, "data": data, "hypothesisId": hypothesis}) + "\n")
-        except Exception:
-            pass
-
-    def _dbg_any_event(self, *args: Any) -> None:
-        """Catch-all event tap (no filter) to prove whether ANY events arrive."""
-        self._dbg_any_count += 1
-        if self._dbg_any_count <= 10 or self._dbg_any_count % 100 == 0:
-            self._dbg(
-                "coordinator.py:_dbg_any_event",
-                "event received (catch-all, unfiltered)",
-                {"count": self._dbg_any_count, "args_types": [type(a).__name__ for a in args], "args_repr": repr(args)[:300]},
-                "H-H1,H-H2,H-H3",
-            )
-    # #endregion
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -137,14 +110,6 @@ class BilresaManager:
                 "Timed out waiting for the Matter Server node list"
             ) from err
 
-        # #region agent log
-        try:
-            self._unsub_dbg_all = self.client.subscribe_events(self._dbg_any_event)
-            self._dbg("coordinator.py:async_connect", "catch-all event tap registered", {}, "H-H1,H-H2,H-H3")
-        except Exception as err:  # noqa: BLE001
-            self._dbg("coordinator.py:async_connect", "catch-all event tap FAILED to register", {"error": str(err), "error_type": type(err).__name__}, "H-H1,H-H2,H-H3")
-        # #endregion
-
         self._bilresa_ids = set(self.get_bilresa_node_ids())
         # The Matter Server client routes events via subscription filters and
         # passes only the new attribute value to the callback (verified at
@@ -158,9 +123,6 @@ class BilresaManager:
                     node_filter=node_id,
                 )
             )
-        # #region agent log
-        self._dbg("coordinator.py:async_connect", "connected; BILRESA nodes discovered", {"bilresa_ids": sorted(self._bilresa_ids), "states": {n: self.get_update_state_name(n) for n in self._bilresa_ids}, "sw_versions": {n: self.get_software_version_string(n) for n in self._bilresa_ids}}, "H-D")
-        # #endregion
         # In case an update is already mid-flight when we start up, evaluate now.
         for node_id in self._bilresa_ids:
             self._evaluate_keepawake(node_id)
@@ -170,24 +132,10 @@ class BilresaManager:
         assert self.client is not None
         try:
             await self.client.start_listening(init_ready)
-            # #region agent log
-            self._dbg("coordinator.py:_listen", "start_listening returned normally (listener ended)", {}, "H-H3")
-            # #endregion
         except asyncio.CancelledError:
-            # #region agent log
-            self._dbg("coordinator.py:_listen", "listener cancelled (normal shutdown)", {}, "H-H3")
-            # #endregion
             raise
         except MatterError as err:
-            # #region agent log
-            self._dbg("coordinator.py:_listen", "listener DIED with MatterError", {"error": str(err)}, "H-H3")
-            # #endregion
             _LOGGER.error("Matter Server listener stopped: %s", err)
-        # #region agent log
-        except Exception as err:  # noqa: BLE001
-            self._dbg("coordinator.py:_listen", "listener DIED with unexpected error", {"error": str(err), "error_type": type(err).__name__}, "H-H3")
-            raise
-        # #endregion
 
     async def async_disconnect(self) -> None:
         """Tear down the connection and stop any keep-awake loops."""
@@ -211,11 +159,6 @@ class BilresaManager:
         for unsub in self._unsub_events:
             unsub()
         self._unsub_events.clear()
-        # #region agent log
-        if self._unsub_dbg_all is not None:
-            self._unsub_dbg_all()
-            self._unsub_dbg_all = None
-        # #endregion
         if self._listen_task is not None:
             self._listen_task.cancel()
             try:
@@ -237,11 +180,6 @@ class BilresaManager:
         The node id is bound via ``partial`` at subscription time because the
         Matter Server client only passes the new attribute value as ``data``.
         """
-        # #region agent log
-        self._dbg_evt_count += 1
-        if self._dbg_evt_count <= 10 or self._dbg_evt_count % 100 == 0:
-            self._dbg("coordinator.py:_handle_node_event", "node-filtered ATTRIBUTE_UPDATED delivered", {"count": self._dbg_evt_count, "node_id": node_id, "event": str(event), "data_repr": repr(data)[:200]}, "H-H1")
-        # #endregion
         # Start/stop the keep-awake loop based on the device's OTA state,
         # regardless of which controller (HA, Apple, Google...) kicked off the
         # update. This is the integration's core job now that the native Matter
@@ -490,11 +428,6 @@ class BilresaManager:
     def _evaluate_keepawake(self, node_id: int) -> None:
         """Start or stop the keep-awake loop based on the device's OTA state."""
         state = self.get_update_state_name(node_id)
-        # #region agent log
-        if self._dbg_last_state.get(node_id, "__unset__") != state:
-            self._dbg("coordinator.py:_evaluate_keepawake", "OTA UpdateState changed", {"node_id": node_id, "state": state, "prev": self._dbg_last_state.get(node_id), "loop_running": node_id in self._keepalive_tasks, "operating_mode": self.get_operating_mode(node_id)}, "H-C,H-D")
-            self._dbg_last_state[node_id] = state
-        # #endregion
         in_progress = state is not None and state not in IDLE_OTA_STATES
         if in_progress and node_id not in self._keepalive_tasks:
             self._start_keepawake(node_id, state)
@@ -518,9 +451,6 @@ class BilresaManager:
                 node_id,
                 battery,
             )
-        # #region agent log
-        self._dbg("coordinator.py:_start_keepawake", "starting keep-awake loop", {"node_id": node_id, "state": state, "battery": battery, "sw_version": self.get_software_version_string(node_id)}, "H-C")
-        # #endregion
         stop_event = asyncio.Event()
         self._keepalive_stops[node_id] = stop_event
         self._keepalive_tasks[node_id] = self.hass.async_create_background_task(
@@ -536,9 +466,6 @@ class BilresaManager:
             "Firmware update on BILRESA node %s finished; stopping keep-awake loop",
             node_id,
         )
-        # #region agent log
-        self._dbg("coordinator.py:_stop_keepawake", "OTA returned to idle; stopping loop", {"node_id": node_id, "state": self.get_update_state_name(node_id), "sw_version": self.get_software_version_string(node_id)}, "H-C")
-        # #endregion
         stop_event = self._keepalive_stops.get(node_id)
         if stop_event is not None:
             stop_event.set()
@@ -598,9 +525,6 @@ class BilresaManager:
             )
         except (MatterError, NodeNotReady) as err:
             _LOGGER.debug("StayActiveRequest failed for node %s: %s", node_id, err)
-            # #region agent log
-            self._dbg("coordinator.py:keep_awake_once", "StayActiveRequest FAILED", {"node_id": node_id, "error": str(err), "error_type": type(err).__name__}, "H-B")
-            # #endregion
             return None
         # The Matter Server websocket API returns command responses as plain
         # dicts (verified at runtime: {'promisedActiveDuration': 30000}).
@@ -608,9 +532,6 @@ class BilresaManager:
             promised = response.get("promisedActiveDuration")
         else:
             promised = getattr(response, "promisedActiveDuration", None)
-        # #region agent log
-        self._dbg("coordinator.py:keep_awake_once", "StayActiveRequest OK", {"node_id": node_id, "promised_active_duration_ms": promised, "requested_ms": KEEP_AWAKE_DURATION_MS, "operating_mode": self.get_operating_mode(node_id), "response_type": type(response).__name__, "response_repr": repr(response)[:400]}, "H-A,H-F")
-        # #endregion
         self._last_promised[node_id] = promised
         self._notify(node_id)
         return promised
@@ -650,9 +571,6 @@ class BilresaManager:
                 )
             else:
                 interval = self._fallback_interval
-            # #region agent log
-            self._dbg("coordinator.py:_keep_awake_loop", "loop iteration; re-arming", {"node_id": node_id, "promised_ms": promised, "next_interval_s": interval, "ota_state": self.get_update_state_name(node_id)}, "H-C")
-            # #endregion
             try:
                 async with asyncio.timeout(interval):
                     await stop_event.wait()
